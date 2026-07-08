@@ -1,4 +1,4 @@
-# static-plugin
+# hyperion-static-plugin
 
 This is an experimental GHC source plugin for writing local `Static c`
 instances for concrete constraints.

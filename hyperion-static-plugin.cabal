@@ -1,5 +1,5 @@
 cabal-version: 3.0
-name: static-plugin
+name: hyperion-static-plugin
 version: 0.1.0.0
 license: MIT
 author: David Simmons-Duffin
@@ -31,7 +31,7 @@ test-suite deriving-spec
       base >= 4.20 && < 5
     , binary
     , hyperion-static
-    , static-plugin
+    , hyperion-static-plugin
   default-language: GHC2024
   ghc-options:
       -Wall

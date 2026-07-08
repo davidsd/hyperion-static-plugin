@@ -178,7 +178,7 @@ parseGeneratedInstance summary staticInstance =
     POk _ declaration -> pure declaration
     PFailed _ ->
       panic $
-        "static-plugin: failed to parse generated instance:\n"
+        "hyperion-static-plugin: failed to parse generated instance:\n"
           <> generatedInstance
   where
     generatedInstance =
@@ -195,7 +195,7 @@ parseGeneratedInstance summary staticInstance =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedInstance)
-        (mkRealSrcLoc (fsLit "<static-plugin>") 1 1)
+        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
 
 rewriteStaticInstance :: ModSummary -> StaticInstance -> Hsc RewriteResult
 rewriteStaticInstance summary staticInstance
@@ -221,7 +221,7 @@ parseGeneratedTHSplice summary staticInstance =
     POk _ declaration -> pure declaration
     PFailed _ ->
       panic $
-        "static-plugin: failed to parse generated TH splice:\n"
+        "hyperion-static-plugin: failed to parse generated TH splice:\n"
           <> generatedSplice
   where
     target = staticConstraintPayload (siHead staticInstance)
@@ -235,7 +235,7 @@ parseGeneratedTHSplice summary staticInstance =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedSplice)
-        (mkRealSrcLoc (fsLit "<static-plugin>") 1 1)
+        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
 
 generatedImports :: ModSummary -> Bool -> [LImportDecl GhcPs] -> Hsc [LImportDecl GhcPs]
 generatedImports summary needsTH imports = do
@@ -251,14 +251,14 @@ parseGeneratedImport summary generatedImport =
     POk _ importDecl -> pure importDecl
     PFailed _ ->
       panic $
-        "static-plugin: failed to parse generated import:\n"
+        "hyperion-static-plugin: failed to parse generated import:\n"
           <> generatedImport
   where
     parserState =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedImport)
-        (mkRealSrcLoc (fsLit "<static-plugin>") 1 1)
+        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
 
 staticInstancesFromTyClDecl :: TyClDecl GhcPs -> (TyClDecl GhcPs, [StaticInstance])
 staticInstancesFromTyClDecl tyClDecl@DataDecl {tcdLName = typeName, tcdTyVars = tyVars, tcdDataDefn = dataDefn} =
