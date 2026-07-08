@@ -1,0 +1,7 @@
+dist-newstyle/
+vendor/
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+.DS_Store
