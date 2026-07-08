@@ -3,7 +3,7 @@ module Hyperion.Static.Plugin
   ) where
 
 import Data.Char (isAlphaNum, isLower)
-import Data.List (intercalate, nub)
+import Data.List (intercalate, nub, stripPrefix)
 import GHC.Data.FastString (fsLit)
 import GHC.Data.StringBuffer (stringToStringBuffer)
 import GHC.Driver.Config.Parser (initParserOpts)
@@ -36,6 +36,7 @@ import GHC.Parser.Lexer
   )
 import GHC.Types.SrcLoc
   ( GenLocated (..)
+  , RealSrcLoc
   , mkRealSrcLoc
   )
 import GHC.Unit.Module.ModSummary (ModSummary (..))
@@ -160,17 +161,8 @@ parseStaticDeriving derivDecl =
         else Nothing
 
 isStaticInstanceType :: String -> Bool
-isStaticInstanceType instanceType =
-  case dropOuterParens instanceType of
-    'S' : 't' : 'a' : 't' : 'i' : 'c' : rest -> startsArg rest
-    qualified
-      | Just rest <- stripPrefixString "Hyperion.Static.Static" qualified ->
-          startsArg rest
-    _ -> False
-  where
-    startsArg (' ' : _) = True
-    startsArg ('(' : _) = True
-    startsArg _ = False
+isStaticInstanceType =
+  maybe False (const True) . staticArgument
 
 parseGeneratedInstance :: ModSummary -> StaticInstance -> Hsc (LHsDecl GhcPs)
 parseGeneratedInstance summary staticInstance =
@@ -195,7 +187,7 @@ parseGeneratedInstance summary staticInstance =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedInstance)
-        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
+        generatedSrcLoc
 
 rewriteStaticInstance :: ModSummary -> StaticInstance -> Hsc RewriteResult
 rewriteStaticInstance summary staticInstance
@@ -235,7 +227,7 @@ parseGeneratedTHSplice summary staticInstance =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedSplice)
-        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
+        generatedSrcLoc
 
 generatedImports :: ModSummary -> Bool -> [LImportDecl GhcPs] -> Hsc [LImportDecl GhcPs]
 generatedImports summary needsTH imports = do
@@ -258,7 +250,11 @@ parseGeneratedImport summary generatedImport =
       initParserState
         (initParserOpts (ms_hspp_opts summary))
         (stringToStringBuffer generatedImport)
-        (mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1)
+        generatedSrcLoc
+
+generatedSrcLoc :: RealSrcLoc
+generatedSrcLoc =
+  mkRealSrcLoc (fsLit "<hyperion-static-plugin>") 1 1
 
 staticInstancesFromTyClDecl :: TyClDecl GhcPs -> (TyClDecl GhcPs, [StaticInstance])
 staticInstancesFromTyClDecl tyClDecl@DataDecl {tcdLName = typeName, tcdTyVars = tyVars, tcdDataDefn = dataDefn} =
@@ -303,34 +299,16 @@ rewriteDerivClauseTys original@(DctSingle _ sigType) =
 rewriteDerivClauseTys (DctMulti ext sigTypes) =
   (DctMulti ext <$> nonMarkerTypes, markers)
   where
-    classified = classifyDerivType <$> sigTypes
+    classified = (\sigType -> (sigType, staticMarker sigType)) <$> sigTypes
     nonMarkerTypes =
       case [sigType | (sigType, Nothing) <- classified] of
         [] -> Nothing
         sigTypes' -> Just sigTypes'
     markers = [markerClass | (_, Just markerClass) <- classified]
 
-classifyDerivType
-  :: Outputable sigType
-  => sigType
-  -> (sigType, Maybe String)
-classifyDerivType sigType =
-  (sigType, staticMarker sigType)
-
 staticMarker :: Outputable sigType => sigType -> Maybe String
 staticMarker sigType =
-  case dropOuterParens (compactSpaces (render sigType)) of
-    'S' : 't' : 'a' : 't' : 'i' : 'c' : rest
-      | startsArg rest -> Just (dropOuterParens (compactSpaces rest))
-    qualified
-      | Just rest <- stripPrefixString "Hyperion.Static.Static" qualified
-      , startsArg rest ->
-          Just (dropOuterParens (compactSpaces rest))
-    _ -> Nothing
-  where
-    startsArg (' ' : _) = True
-    startsArg ('(' : _) = True
-    startsArg _ = False
+  staticArgument (compactSpaces (render sigType))
 
 tyVarNames :: LHsQTyVars GhcPs -> [String]
 tyVarNames (HsQTvs {hsq_explicit = tyVars}) =
@@ -355,7 +333,7 @@ splitContext instanceType =
 
 dropForall :: String -> String
 dropForall input =
-  case stripPrefixString "forall " input of
+  case stripPrefix "forall " input of
     Just rest ->
       case break (== '.') rest of
         (_, '.' : afterDot) -> compactSpaces afterDot
@@ -437,29 +415,30 @@ generatedContext staticInstance classifiedContext =
         <$> ccImplicitStaticPayloads classifiedContext
 
 isTypeableConstraint :: String -> Bool
-isTypeableConstraint constraint =
-  case dropOuterParens constraint of
-    'T' : 'y' : 'p' : 'e' : 'a' : 'b' : 'l' : 'e' : rest -> startsArg rest
-    qualified
-      | Just rest <- stripPrefixString "Type.Reflection.Typeable" qualified ->
-          startsArg rest
-      | Just rest <- stripPrefixString "Data.Typeable.Typeable" qualified ->
-          startsArg rest
-    _ -> False
-  where
-    startsArg (' ' : _) = True
-    startsArg ('(' : _) = True
-    startsArg _ = False
+isTypeableConstraint =
+  maybe False (const True) . typeableArgument
+
+startsTypeArg :: String -> Bool
+startsTypeArg (' ' : _) = True
+startsTypeArg ('(' : _) = True
+startsTypeArg _ = False
 
 staticConstraintPayload :: String -> String
 staticConstraintPayload constraint =
-  dropOuterParens $
-    case dropOuterParens constraint of
-      'S' : 't' : 'a' : 't' : 'i' : 'c' : rest -> dropOuterParens (compactSpaces rest)
-      qualified
-        | Just rest <- stripPrefixString "Hyperion.Static.Static" qualified ->
-            dropOuterParens (compactSpaces rest)
-      other -> other
+  case staticArgument constraint of
+    Just argument -> argument
+    Nothing -> dropOuterParens constraint
+
+staticArgument :: String -> Maybe String
+staticArgument constraint =
+  case dropOuterParens constraint of
+    'S' : 't' : 'a' : 't' : 'i' : 'c' : rest
+      | startsTypeArg rest -> Just (dropOuterParens (compactSpaces rest))
+    qualified
+      | Just rest <- stripPrefix "Hyperion.Static.Static" qualified
+      , startsTypeArg rest ->
+          Just (dropOuterParens (compactSpaces rest))
+    _ -> Nothing
 
 explicitTypeableVariables :: [String] -> [String]
 explicitTypeableVariables =
@@ -467,14 +446,21 @@ explicitTypeableVariables =
 
 typeableVariable :: String -> [String]
 typeableVariable constraint =
+  maybe [] (\argument -> typeVariables [argument]) (typeableArgument constraint)
+
+typeableArgument :: String -> Maybe String
+typeableArgument constraint =
   case dropOuterParens constraint of
-    'T' : 'y' : 'p' : 'e' : 'a' : 'b' : 'l' : 'e' : rest -> typeVariables [rest]
+    'T' : 'y' : 'p' : 'e' : 'a' : 'b' : 'l' : 'e' : rest
+      | startsTypeArg rest -> Just (dropOuterParens (compactSpaces rest))
     qualified
-      | Just rest <- stripPrefixString "Type.Reflection.Typeable" qualified ->
-          typeVariables [rest]
-      | Just rest <- stripPrefixString "Data.Typeable.Typeable" qualified ->
-          typeVariables [rest]
-    _ -> []
+      | Just rest <- stripPrefix "Type.Reflection.Typeable" qualified
+      , startsTypeArg rest ->
+          Just (dropOuterParens (compactSpaces rest))
+      | Just rest <- stripPrefix "Data.Typeable.Typeable" qualified
+      , startsTypeArg rest ->
+          Just (dropOuterParens (compactSpaces rest))
+    _ -> Nothing
 
 typeVariables :: [String] -> [String]
 typeVariables =
@@ -534,10 +520,3 @@ stripLastParen input =
   case reverse input of
     ')' : rest -> Just (reverse rest)
     _ -> Nothing
-
-stripPrefixString :: String -> String -> Maybe String
-stripPrefixString [] ys = Just ys
-stripPrefixString (_ : _) [] = Nothing
-stripPrefixString (x : xs) (y : ys)
-  | x == y = stripPrefixString xs ys
-  | otherwise = Nothing
