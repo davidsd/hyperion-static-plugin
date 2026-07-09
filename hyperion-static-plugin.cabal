@@ -36,3 +36,6 @@ test-suite deriving-spec
   default-language: GHC2024
   ghc-options:
       -Wall
+      -Werror
+      -Wredundant-constraints
+      -Wsimplifiable-class-constraints

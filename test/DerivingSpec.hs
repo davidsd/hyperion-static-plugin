@@ -2,8 +2,10 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE StaticPointers #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -12,6 +14,7 @@ module Main where
 
 import Data.Binary (Binary)
 import GHC.Generics (Generic)
+import GHC.TypeNats (KnownNat, Nat)
 import Hyperion.Static
 
 -- Unambiguous datatype deriving can keep the concise, strategy-free form.
@@ -97,6 +100,36 @@ tripleShowDict = closureDict
 
 tripleEqDict :: Closure (Dict (Eq (Triple Int Bool ())))
 tripleEqDict = closureDict
+
+-- Variables explicitly kinded as Nat should get KnownNat constraints, not
+-- Typeable constraints. With -Wsimplifiable-class-constraints enabled, emitting
+-- Typeable p here is a warning; the test suite treats that warning as an error.
+data NatBox (p :: Nat) = NatBox
+  deriving stock Generic
+  deriving anyclass (Binary, Static Binary)
+
+natBoxDict :: Closure (Dict (Binary (NatBox 3)))
+natBoxDict = closureDict
+
+-- Mixed ordinary and Nat-kinded parameters should keep Static constraints for
+-- ordinary payloads while using KnownNat for the Nat parameter.
+data NatPair a (p :: Nat) = NatPair a
+  deriving stock Generic
+  deriving anyclass (Binary, Static Binary)
+
+natPairDict :: Closure (Dict (Binary (NatPair Foo 5)))
+natPairDict = closureDict
+
+-- The standalone-deriving path has its own context-generation logic. It should
+-- simplify Static (KnownNat p) to KnownNat p and avoid a redundant Typeable p.
+data StandaloneNat (p :: Nat) = StandaloneNat
+  deriving stock Generic
+  deriving anyclass Binary
+
+deriving instance KnownNat p => Static (Binary (StandaloneNat p))
+
+standaloneNatDict :: Closure (Dict (Binary (StandaloneNat 7)))
+standaloneNatDict = closureDict
 
 main :: IO ()
 main = pure ()
