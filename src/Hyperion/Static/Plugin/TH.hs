@@ -10,12 +10,12 @@ import Data.List (nub)
 import Data.Monoid (Endo (Endo, appEndo))
 import Data.Typeable (Typeable)
 import GHC.TypeNats (KnownNat, Nat)
-import Hyperion.Static (Closure, Static (closureDict), cAp, cPtr)
+import Hyperion.Static (Closure, Static (closureDict), cAp)
 import Language.Haskell.TH
   ( Body (NormalB)
   , Clause (Clause)
   , Dec (FunD, InstanceD)
-  , Exp (AppE, ConE, InfixE, LamE, SigE, StaticE, VarE)
+  , Exp (ConE, InfixE, LamE, SigE, StaticE, VarE)
   , InstanceDec
   , Name
   , Pat (ConP)
@@ -54,8 +54,6 @@ mkInstanceWithTypeableExclusions typeableExclusions getClosureDictName staticCla
       getClosureDict = VarE getClosureDictName
       addClassF = AppT (ConT staticClassName)
       addTypeableF = AppT (ConT ''Typeable)
-      fromStaticPtrName = 'cPtr
-      fromStaticPtrExp = VarE fromStaticPtrName
       newType = addClassF oldType
       newStaticCxt = addClassF <$> oldCxt
       oldTypeVars = nub ((oldType : oldCxt) >>= findAllTypeVars)
@@ -76,7 +74,7 @@ mkInstanceWithTypeableExclusions typeableExclusions getClosureDictName staticCla
       funcPart = case length oldCxt of
         0 -> dictValue
         n -> LamE (replicate n dictPat) dictValue
-      body = NormalB (foldl addArg (AppE fromStaticPtrExp (StaticE funcPart)) oldCxt)
+      body = NormalB (foldl addArg (StaticE funcPart) oldCxt)
       clause = Clause [] body []
       funClause = FunD getClosureDictName [clause]
     in

@@ -90,7 +90,7 @@ generates an instance with this shape:
 ```haskell
 instance (Typeable a, Static (Binary a)) => Static (Binary (Box a)) where
   closureDict =
-    cPtr (static (\Dict -> Dict))
+    static (\Dict -> Dict)
       `cAp` (closureDict :: Closure (Dict (Binary a)))
 ```
 
@@ -112,13 +112,13 @@ generates:
 
 ```haskell
 instance KnownNat p => Static (Binary (NatBox p)) where
-  closureDict = cPtr (static Dict)
+  closureDict = static Dict
 ```
 
 The plugin emits `KnownNat p` rather than `Typeable p` for variables explicitly
 quantified at kind `Nat`. This avoids `-Wsimplifiable-class-constraints`
 warnings from the built-in `Typeable` instance while still providing the
-dictionary required by `cPtr`.
+dictionary needed to build the closure.
 
 The constraint-generation step has a small replacement pass. Currently it
 rewrites `Static (KnownNat p)` to `KnownNat p` and removes the matching
