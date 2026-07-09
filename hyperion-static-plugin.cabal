@@ -14,6 +14,7 @@ library
       src
   build-depends:
       base >= 4.20 && < 5
+    , constraints
     , ghc == 9.12.*
     , ghc-boot-th
     , hyperion-static

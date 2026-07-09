@@ -58,7 +58,8 @@ import Language.Haskell.Syntax.Decls
   )
 import Language.Haskell.Syntax.ImpExp (LImportDecl)
 import Language.Haskell.Syntax.Type
-  ( HsBndrVar (..)
+  ( HsBndrKind (..)
+  , HsBndrVar (..)
   , HsTyVarBndr (..)
   , LHsQTyVars (..)
   )
@@ -138,6 +139,7 @@ keepOriginal original =
 data StaticInstance = StaticInstance
   { siContext :: [String]
   , siHead :: String
+  , siQuantifiedVariables :: [String]
   }
 
 data ClassifiedContext = ClassifiedContext
@@ -157,6 +159,7 @@ parseStaticDeriving derivDecl =
             StaticInstance
               { siContext = context
               , siHead = headType
+              , siQuantifiedVariables = []
               }
         else Nothing
 
@@ -218,9 +221,13 @@ parseGeneratedTHSplice summary staticInstance =
   where
     target = staticConstraintPayload (siHead staticInstance)
     quantifiedTarget =
-      case typeVariables [target] of
+      case quantifiedVariables of
         [] -> target
         variables -> "forall " <> unwords variables <> ". " <> target
+    quantifiedVariables =
+      case siQuantifiedVariables staticInstance of
+        [] -> typeVariables [target]
+        variables -> variables
     generatedSplice =
       "$(deriveStatic [t| " <> quantifiedTarget <> " |])"
     parserState =
@@ -262,6 +269,7 @@ staticInstancesFromTyClDecl tyClDecl@DataDecl {tcdLName = typeName, tcdTyVars = 
   , [ StaticInstance
         { siContext = []
         , siHead = "Static (" <> markerClass <> " " <> appliedType <> ")"
+        , siQuantifiedVariables = tyVarQuantifiers tyVars
         }
     | markerClass <- markers
     ]
@@ -314,9 +322,20 @@ tyVarNames :: LHsQTyVars GhcPs -> [String]
 tyVarNames (HsQTvs {hsq_explicit = tyVars}) =
   concatMap tyVarName tyVars
 
+tyVarQuantifiers :: LHsQTyVars GhcPs -> [String]
+tyVarQuantifiers (HsQTvs {hsq_explicit = tyVars}) =
+  concatMap tyVarQuantifier tyVars
+
 tyVarName :: GenLocated l (HsTyVarBndr flag GhcPs) -> [String]
 tyVarName (L _ HsTvb {tvb_var = HsBndrVar _ name}) = [render name]
 tyVarName _ = []
+
+tyVarQuantifier :: GenLocated l (HsTyVarBndr flag GhcPs) -> [String]
+tyVarQuantifier (L _ HsTvb {tvb_var = HsBndrVar _ name, tvb_kind = kind}) =
+  case kind of
+    HsBndrKind _ hsKind -> ["(" <> render name <> " :: " <> compactSpaces (render hsKind) <> ")"]
+    HsBndrNoKind _ -> [render name]
+tyVarQuantifier _ = []
 
 render :: Outputable a => a -> String
 render = showSDocUnsafe . ppr
@@ -396,10 +415,11 @@ classifyContext =
 
 generatedContext :: StaticInstance -> ClassifiedContext -> [String]
 generatedContext staticInstance classifiedContext =
-  typeableConstraints
-    <> ccExplicitOtherConstraints classifiedContext
-    <> ccExplicitStaticConstraints classifiedContext
-    <> implicitStaticConstraints
+  applyConstraintReplacements $
+    typeableConstraints
+      <> ccExplicitOtherConstraints classifiedContext
+      <> ccExplicitStaticConstraints classifiedContext
+      <> implicitStaticConstraints
   where
     explicitConstraints =
       ccExplicitOtherConstraints classifiedContext
@@ -413,6 +433,51 @@ generatedContext staticInstance classifiedContext =
       ("Static (" <>)
         . (<> ")")
         <$> ccImplicitStaticPayloads classifiedContext
+
+applyConstraintReplacements :: [String] -> [String]
+applyConstraintReplacements =
+  applyAll
+    [ replaceStaticKnownNatConstraints
+    ]
+
+applyAll :: [a -> a] -> a -> a
+applyAll replacements value =
+  foldl (flip ($)) value replacements
+
+replaceStaticKnownNatConstraints :: [String] -> [String]
+replaceStaticKnownNatConstraints constraints =
+  filter (not . isTypeableKnownNatVariable knownNatVariables) $
+    replaceStaticKnownNatConstraint <$> constraints
+  where
+    knownNatVariables =
+      concatMap
+        (maybe [] (typeVariables . (: [])) . knownNatArgument)
+        (replaceStaticKnownNatConstraint <$> constraints)
+
+replaceStaticKnownNatConstraint :: String -> String
+replaceStaticKnownNatConstraint constraint =
+  case staticArgument constraint >>= knownNatArgument of
+    Just knownNatArg -> "KnownNat " <> knownNatArg
+    Nothing -> constraint
+
+isTypeableKnownNatVariable :: [String] -> String -> Bool
+isTypeableKnownNatVariable knownNatVariables constraint =
+  case typeableArgument constraint of
+    Just typeableArg ->
+      let variables = typeVariables [typeableArg]
+       in not (null variables) && all (`elem` knownNatVariables) variables
+    Nothing -> False
+
+knownNatArgument :: String -> Maybe String
+knownNatArgument constraint =
+  case dropOuterParens constraint of
+    'K' : 'n' : 'o' : 'w' : 'n' : 'N' : 'a' : 't' : rest
+      | startsTypeArg rest -> Just (dropOuterParens (compactSpaces rest))
+    qualified
+      | Just rest <- stripPrefix "GHC.TypeNats.KnownNat" qualified
+      , startsTypeArg rest ->
+          Just (dropOuterParens (compactSpaces rest))
+    _ -> Nothing
 
 isTypeableConstraint :: String -> Bool
 isTypeableConstraint =
